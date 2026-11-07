@@ -1,0 +1,56 @@
+name: CI memory retention
+on:
+  push:
+    branches: [replacement-ci-memory-retention-01]
+    paths: [.github/retention-ready]
+permissions:
+  contents: read
+concurrency:
+  group: ci-memory-retention
+  cancel-in-progress: false
+jobs:
+  retain:
+    if: github.repository == 'mohanad-hafez/openvino-checks'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install schema validator
+        run: python3 -m pip install jsonschema==4.25.1
+      - name: Check retention boundaries
+        run: python3 -m unittest discover -s .github/retention -p test_ci_memory_retention.py -v
+      - name: Apply bounded retention
+        run: python3 .github/retention/ci_memory_retention.py --plan .github/retention/input-plan.json --schema .github/retention/index.schema.json
+      - name: Publish memory update
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          retries: 0
+          script: |
+            const fs=require('node:fs');
+            const r=JSON.parse(fs.readFileSync('retention-result.json'));
+            if(r.before_records!==386||r.after_records!==300||r.deleted_records.length!==86||!r.index_unchanged||!r.patterns_unchanged)throw Error('Unexpected retention result');
+            const ref=await github.rest.git.getRef({...context.repo,ref:'heads/replacement-ci-memory-retention-01'});
+            if(ref.data.object.sha!==context.sha)throw Error('Experimental branch changed');
+            const parent=await github.rest.git.getCommit({...context.repo,commit_sha:context.sha});
+            const receipt={status:'delivery_started',parent:context.sha};
+            fs.writeFileSync('retention-publication.json',JSON.stringify(receipt,null,2));
+            try {
+              const tree=await github.rest.git.createTree({...context.repo,base_tree:parent.data.tree.sha,tree:r.deleted_records.map(name=>({path:'mq/investigations/'+name,mode:'100644',type:'blob',sha:null}))});
+              const commit=await github.rest.git.createCommit({...context.repo,message:'Apply investigation retention',tree:tree.data.sha,parents:[context.sha]});
+              receipt.commit=commit.data.sha;fs.writeFileSync('retention-publication.json',JSON.stringify(receipt,null,2));
+              await github.rest.git.updateRef({...context.repo,ref:'heads/replacement-ci-memory-retention-01',sha:commit.data.sha,force:false});
+              receipt.status='published';
+            } catch(error){receipt.status='delivery_uncertain';throw error}
+            finally{fs.writeFileSync('retention-publication.json',JSON.stringify(receipt,null,2))}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ci-memory-retention
+          path: |
+            retention-result.json
+            retention-publication.json
+          retention-days: 7
