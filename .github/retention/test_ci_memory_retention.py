@@ -12,6 +12,11 @@ class RetentionTests(unittest.TestCase):
         names = ["2026-11-07-00-00-00-000-1.json"]
         self.assertEqual(choose_deletions(names, names[0]), [])
 
+    def test_native_legacy_discriminator(self):
+        old = "2026-07-15-12-22-41-000-29410904372b.json"
+        new = "2026-11-06-18-21-38-000-42251178965.json"
+        self.assertEqual(choose_deletions([new, old], new, limit=1), [old])
+
     def test_unsafe_or_unprotected_input_rejected(self):
         with self.assertRaises(ValueError):
             choose_deletions(["../a.json"], "../a.json")

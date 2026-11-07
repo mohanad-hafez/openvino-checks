@@ -12,7 +12,9 @@ INDEX_LIMIT = 2000
 FILE_LIMIT = 1000
 BYTE_LIMIT = 1048576
 INDEX_HEADROOM = 0.9
-RECORD_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}-\d+\.json$")
+# Historical native records include an alphabetic discriminator after the run ID.
+# Retention orders by the timestamp prefix; safe suffixes do not change that rule.
+RECORD_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}-[A-Za-z0-9_-]+\.json$")
 
 
 def git_blob(data):
