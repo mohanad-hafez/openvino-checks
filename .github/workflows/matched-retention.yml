@@ -1,0 +1,51 @@
+name: Matched CI memory retention
+on:
+  push:
+    branches: [matched-ci-retention-01]
+permissions:
+  contents: read
+jobs:
+  retention:
+    if: github.repository == 'mohanad-hafez/openvino-checks'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      copilot-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [agent, script]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up the shared validator
+        run: python3 -m pip install jsonschema==4.25.1
+      - name: Install Copilot
+        if: matrix.arm == 'agent'
+        run: npm install --global @github/copilot@1.0.108
+      - name: Run retention on the saved memory
+        env:
+          ARM: ${{ matrix.arm }}
+          GITHUB_TOKEN: ${{ matrix.arm == 'agent' && github.token || '' }}
+        run: |
+          mkdir evidence
+          date +%s%N > evidence/start-ns
+          trap 'date +%s%N > evidence/end-ns' EXIT
+          if [ "$ARM" = agent ]; then
+            python3 .github/matched/retention-arm.py fixture
+            node -e 'const c=process.cwd();console.log(JSON.stringify({mcpServers:{fixture:{type:"local",command:"node",args:[c+"/.github/matched/component_fixture.cjs",c+"/evidence/fixture.json",c+"/evidence/tools.jsonl"],tools:["*"]}}}))' > fixture-mcp.json
+            timeout 150s copilot --disable-builtin-mcps --disable-client-telemetry \
+              --additional-mcp-config=@fixture-mcp.json \
+              --available-tools=fixture-read_input,fixture-publish_result \
+              --allow-tool=fixture --no-ask-user --no-color --silent \
+              --prompt "$(cat .github/matched/retention-prompt.md)" > evidence/output.txt 2> evidence/diagnostics.txt
+          fi
+          python3 .github/matched/retention-arm.py "$ARM"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: retention-${{ matrix.arm }}
+          path: evidence/
+          retention-days: 14
